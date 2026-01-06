@@ -62,9 +62,14 @@ export default function AdminLayout() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-muted/30 flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <Skeleton className="h-12 w-12 rounded-full mx-auto" />
-          <Skeleton className="h-4 w-32 mx-auto" />
+        <div className="text-center space-y-4 animate-in fade-in duration-300">
+          <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto animate-pulse">
+            <Church className="h-8 w-8 text-primary" />
+          </div>
+          <div className="space-y-2">
+            <p className="font-display font-semibold text-foreground">Loading Admin Panel</p>
+            <p className="text-sm text-muted-foreground">Verifying your access...</p>
+          </div>
         </div>
       </div>
     );

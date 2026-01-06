@@ -51,12 +51,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
         
         // Check admin role with setTimeout to avoid deadlock
+        // Set isCheckingAdmin to true BEFORE setTimeout to prevent flash
         if (session?.user) {
+          setIsCheckingAdmin(true);
           setTimeout(() => {
             checkAdminRole(session.user.id);
           }, 0);
         } else {
           setIsAdmin(false);
+          setIsCheckingAdmin(false);
         }
       }
     );
