@@ -12,6 +12,7 @@ import Events from "./pages/admin/Events";
 import Videos from "./pages/admin/Videos";
 import Messages from "./pages/admin/Messages";
 import Settings from "./pages/admin/Settings";
+import Admins from "./pages/admin/Admins";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +32,7 @@ const App = () => (
               <Route path="events" element={<Events />} />
               <Route path="videos" element={<Videos />} />
               <Route path="messages" element={<Messages />} />
+              <Route path="admins" element={<Admins />} />
               <Route path="settings" element={<Settings />} />
             </Route>
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
