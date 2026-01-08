@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getAllGalleryAlbums, createGalleryAlbum, updateGalleryAlbum, deleteGalleryAlbum, getGalleryImagesByAlbum, createGalleryImage, deleteGalleryImage, updateImageOrder } from "@/integrations/firebase/firestore/church";
+import { uploadFile, deleteFile } from "@/integrations/firebase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,18 +23,18 @@ interface Album {
   id: string;
   title: string;
   description: string | null;
-  cover_image_url: string | null;
-  is_active: boolean;
-  display_order: number;
-  created_at: string;
+  coverImageUrl: string | null;
+  isActive: boolean;
+  displayOrder: number;
+  createdAt: string;
 }
 
 interface GalleryImage {
   id: string;
-  album_id: string;
-  image_url: string;
+  albumId: string;
+  imageUrl: string;
   caption: string | null;
-  display_order: number;
+  displayOrder: number;
 }
 
 export default function Gallery() {
@@ -46,24 +47,7 @@ export default function Gallery() {
 
   const { data: albums, isLoading } = useQuery({
     queryKey: ["admin-albums"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("gallery_albums")
-        .select("*")
-        .order("display_order", { ascending: true });
-
-      if (error) throw error;
-      
-      // Sync selectedAlbum with fresh data to keep UI in sync
-      if (selectedAlbum && data) {
-        const updatedAlbum = data.find((a: Album) => a.id === selectedAlbum.id);
-        if (updatedAlbum && JSON.stringify(updatedAlbum) !== JSON.stringify(selectedAlbum)) {
-          setSelectedAlbum(updatedAlbum);
-        }
-      }
-      
-      return data as Album[];
-    },
+    queryFn: getAllGalleryAlbums,
     refetchInterval: 5000, // Background refresh every 5 seconds
   });
 
@@ -71,14 +55,7 @@ export default function Gallery() {
     queryKey: ["album-images", selectedAlbum?.id],
     queryFn: async () => {
       if (!selectedAlbum) return [];
-      const { data, error } = await supabase
-        .from("gallery_images")
-        .select("*")
-        .eq("album_id", selectedAlbum.id)
-        .order("display_order", { ascending: true });
-
-      if (error) throw error;
-      return data as GalleryImage[];
+      return getGalleryImagesByAlbum(selectedAlbum.id);
     },
     enabled: !!selectedAlbum,
     refetchInterval: 5000, // Background refresh every 5 seconds
@@ -86,11 +63,10 @@ export default function Gallery() {
 
   const createAlbumMutation = useMutation({
     mutationFn: async (album: { title: string; description: string }) => {
-      const { error } = await supabase.from("gallery_albums").insert({
+      await createGalleryAlbum({
         title: album.title,
         description: album.description || null,
       });
-      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-albums"] });
@@ -105,8 +81,7 @@ export default function Gallery() {
 
   const deleteAlbumMutation = useMutation({
     mutationFn: async (albumId: string) => {
-      const { error } = await supabase.from("gallery_albums").delete().eq("id", albumId);
-      if (error) throw error;
+      await deleteGalleryAlbum(albumId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-albums"] });
@@ -120,11 +95,7 @@ export default function Gallery() {
 
   const toggleAlbumVisibility = useMutation({
     mutationFn: async ({ albumId, isActive }: { albumId: string; isActive: boolean }) => {
-      const { error } = await supabase
-        .from("gallery_albums")
-        .update({ is_active: isActive })
-        .eq("id", albumId);
-      if (error) throw error;
+      await updateGalleryAlbum(albumId, { isActive });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-albums"] });
@@ -135,13 +106,13 @@ export default function Gallery() {
   const deleteImageMutation = useMutation({
     mutationFn: async (image: GalleryImage) => {
       // Delete from storage
-      const fileName = image.image_url.split("/").pop();
-      if (fileName) {
-        await supabase.storage.from("gallery").remove([`${selectedAlbum?.id}/${fileName}`]);
+      const fileName = image.imageUrl.split("/").pop();
+      if (fileName && selectedAlbum?.id) {
+        const storagePath = `gallery/${selectedAlbum.id}/${fileName}`;
+        await deleteFile(storagePath);
       }
       // Delete from database
-      const { error } = await supabase.from("gallery_images").delete().eq("id", image.id);
-      if (error) throw error;
+      await deleteGalleryImage(image.id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["album-images", selectedAlbum?.id] });
@@ -162,32 +133,22 @@ export default function Gallery() {
       for (const file of files) {
         const fileExt = file.name.split(".").pop();
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const filePath = `${selectedAlbum.id}/${fileName}`;
+        const storagePath = `gallery/${selectedAlbum.id}/${fileName}`;
 
-        // Upload to storage
-        const { error: uploadError } = await supabase.storage
-          .from("gallery")
-          .upload(filePath, file);
+        // Upload to Firebase storage
+        const imageUrl = await uploadFile(storagePath, file, file.type);
 
-        if (uploadError) throw uploadError;
-
-        // Get public URL
-        const { data: urlData } = supabase.storage.from("gallery").getPublicUrl(filePath);
-
-        // Save to database
-        const { error: dbError } = await supabase.from("gallery_images").insert({
-          album_id: selectedAlbum.id,
-          image_url: urlData.publicUrl,
+        // Save to Firestore
+        await createGalleryImage({
+          albumId: selectedAlbum.id,
+          imageUrl,
+          caption: null,
+          displayOrder: 0,
         });
 
-        if (dbError) throw dbError;
-
         // Update cover image if first image
-        if (!selectedAlbum.cover_image_url) {
-          await supabase
-            .from("gallery_albums")
-            .update({ cover_image_url: urlData.publicUrl })
-            .eq("id", selectedAlbum.id);
+        if (!selectedAlbum.coverImageUrl) {
+          await updateGalleryAlbum(selectedAlbum.id, { coverImageUrl: imageUrl });
         }
       }
 
@@ -276,11 +237,11 @@ export default function Gallery() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-medium truncate">{album.title}</h3>
                         <p className="text-sm text-muted-foreground">
-                          {format(new Date(album.created_at), "MMM d, yyyy")}
+                          {format(new Date(album.createdAt), "MMM d, yyyy")}
                         </p>
                       </div>
-                      <Badge variant={album.is_active ? "default" : "secondary"}>
-                        {album.is_active ? "Active" : "Hidden"}
+                      <Badge variant={album.isActive ? "default" : "secondary"}>
+                        {album.isActive ? "Active" : "Hidden"}
                       </Badge>
                     </div>
                   </CardContent>
@@ -312,12 +273,12 @@ export default function Gallery() {
                     onClick={() =>
                       toggleAlbumVisibility.mutate({
                         albumId: selectedAlbum.id,
-                        isActive: !selectedAlbum.is_active,
+                        isActive: !selectedAlbum.isActive,
                       })
                     }
-                    title={selectedAlbum.is_active ? "Hide album" : "Show album"}
+                    title={selectedAlbum.isActive ? "Hide album" : "Show album"}
                   >
-                    {selectedAlbum.is_active ? (
+                    {selectedAlbum.isActive ? (
                       <Eye className="h-4 w-4" />
                     ) : (
                       <EyeOff className="h-4 w-4" />
@@ -358,7 +319,7 @@ export default function Gallery() {
                     {albumImages.map((image) => (
                       <div key={image.id} className="relative group aspect-square">
                         <img
-                          src={image.image_url}
+                          src={image.imageUrl}
                           alt={image.caption || "Gallery image"}
                           className="w-full h-full object-cover rounded-lg"
                         />

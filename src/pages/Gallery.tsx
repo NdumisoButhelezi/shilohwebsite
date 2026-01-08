@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getActiveGalleryAlbums, getGalleryImagesByAlbum } from "@/integrations/firebase/firestore/church";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,13 +36,14 @@ export default function Gallery() {
   const { data: albums, isLoading: albumsLoading } = useQuery({
     queryKey: ["public-albums"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("gallery_albums")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      return data as Album[];
+      const firebaseAlbums = await getActiveGalleryAlbums();
+      return firebaseAlbums.map(album => ({
+        id: album.id || '',
+        title: album.title,
+        description: album.description || null,
+        cover_image_url: album.coverImageUrl || null,
+        created_at: album.createdAt instanceof Date ? album.createdAt.toISOString() : new Date().toISOString()
+      }));
     },
   });
 
@@ -50,14 +51,12 @@ export default function Gallery() {
     queryKey: ["public-album-images", selectedAlbum?.id],
     queryFn: async () => {
       if (!selectedAlbum) return [];
-      const { data, error } = await supabase
-        .from("gallery_images")
-        .select("*")
-        .eq("album_id", selectedAlbum.id)
-        .order("display_order", { ascending: true });
-
-      if (error) throw error;
-      return data as GalleryImage[];
+      const firebaseImages = await getGalleryImagesByAlbum(selectedAlbum.id);
+      return firebaseImages.map(img => ({
+        id: img.id || '',
+        image_url: img.imageUrl,
+        caption: img.description || null
+      }));
     },
     enabled: !!selectedAlbum,
   });

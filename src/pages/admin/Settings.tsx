@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getChurchInfo, updateChurchInfo } from "@/integrations/firebase/firestore/church";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,57 +16,42 @@ export default function AdminSettings() {
 
   const { data: churchInfo, isLoading } = useQuery({
     queryKey: ["admin-church-info"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("church_info")
-        .select("*")
-        .maybeSingle();
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getChurchInfo,
   });
 
   const [formData, setFormData] = useState({
-    church_name: "",
+    churchName: "",
     address: "",
     phone: "",
     email: "",
-    mission_statement: "",
-    vision_statement: "",
-    youtube_channel_url: "",
-    facebook_url: "",
-    instagram_url: "",
-    google_maps_embed_url: "",
+    missionStatement: "",
+    visionStatement: "",
+    youtubeChannelUrl: "",
+    facebookUrl: "",
+    instagramUrl: "",
+    googleMapsEmbedUrl: "",
   });
 
   useEffect(() => {
     if (churchInfo) {
       setFormData({
-        church_name: churchInfo.church_name || "",
+        churchName: churchInfo.churchName || "",
         address: churchInfo.address || "",
         phone: churchInfo.phone || "",
         email: churchInfo.email || "",
-        mission_statement: churchInfo.mission_statement || "",
-        vision_statement: churchInfo.vision_statement || "",
-        youtube_channel_url: churchInfo.youtube_channel_url || "",
-        facebook_url: churchInfo.facebook_url || "",
-        instagram_url: churchInfo.instagram_url || "",
-        google_maps_embed_url: churchInfo.google_maps_embed_url || "",
+        missionStatement: churchInfo.missionStatement || "",
+        visionStatement: churchInfo.visionStatement || "",
+        youtubeChannelUrl: churchInfo.youtubeChannelUrl || "",
+        facebookUrl: churchInfo.facebookUrl || "",
+        instagramUrl: churchInfo.instagramUrl || "",
+        googleMapsEmbedUrl: churchInfo.googleMapsEmbedUrl || "",
       });
     }
   }, [churchInfo]);
 
   const updateMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      if (!churchInfo?.id) throw new Error("No church info found");
-      
-      const { error } = await supabase
-        .from("church_info")
-        .update(data)
-        .eq("id", churchInfo.id);
-
-      if (error) throw error;
+      await updateChurchInfo(data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-church-info"] });
@@ -119,11 +104,11 @@ export default function AdminSettings() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="church_name">Church Name</Label>
+                  <Label htmlFor="churchName">Church Name</Label>
                   <Input
-                    id="church_name"
-                    value={formData.church_name}
-                    onChange={(e) => setFormData({ ...formData, church_name: e.target.value })}
+                    id="churchName"
+                    value={formData.churchName}
+                    onChange={(e) => setFormData({ ...formData, churchName: e.target.value })}
                   />
                 </div>
 
@@ -160,11 +145,11 @@ export default function AdminSettings() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="google_maps_embed_url">Google Maps Embed URL</Label>
+                  <Label htmlFor="googleMapsEmbedUrl">Google Maps Embed URL</Label>
                   <Input
-                    id="google_maps_embed_url"
-                    value={formData.google_maps_embed_url}
-                    onChange={(e) => setFormData({ ...formData, google_maps_embed_url: e.target.value })}
+                    id="googleMapsEmbedUrl"
+                    value={formData.googleMapsEmbedUrl}
+                    onChange={(e) => setFormData({ ...formData, googleMapsEmbedUrl: e.target.value })}
                     placeholder="https://www.google.com/maps/embed?..."
                   />
                   <p className="text-xs text-muted-foreground">
@@ -183,22 +168,22 @@ export default function AdminSettings() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="mission_statement">Mission Statement</Label>
+                  <Label htmlFor="missionStatement">Mission Statement</Label>
                   <Textarea
-                    id="mission_statement"
-                    value={formData.mission_statement}
-                    onChange={(e) => setFormData({ ...formData, mission_statement: e.target.value })}
+                    id="missionStatement"
+                    value={formData.missionStatement}
+                    onChange={(e) => setFormData({ ...formData, missionStatement: e.target.value })}
                     rows={4}
                     placeholder="Our church mission is..."
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="vision_statement">Vision Statement</Label>
+                  <Label htmlFor="visionStatement">Vision Statement</Label>
                   <Textarea
-                    id="vision_statement"
-                    value={formData.vision_statement}
-                    onChange={(e) => setFormData({ ...formData, vision_statement: e.target.value })}
+                    id="visionStatement"
+                    value={formData.visionStatement}
+                    onChange={(e) => setFormData({ ...formData, visionStatement: e.target.value })}
                     rows={4}
                     placeholder="Our vision is to..."
                   />
@@ -215,31 +200,31 @@ export default function AdminSettings() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="youtube_channel_url">YouTube Channel URL</Label>
+                  <Label htmlFor="youtubeChannelUrl">YouTube Channel URL</Label>
                   <Input
-                    id="youtube_channel_url"
-                    value={formData.youtube_channel_url}
-                    onChange={(e) => setFormData({ ...formData, youtube_channel_url: e.target.value })}
+                    id="youtubeChannelUrl"
+                    value={formData.youtubeChannelUrl}
+                    onChange={(e) => setFormData({ ...formData, youtubeChannelUrl: e.target.value })}
                     placeholder="https://www.youtube.com/@yourchannel"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="facebook_url">Facebook Page URL</Label>
+                  <Label htmlFor="facebookUrl">Facebook Page URL</Label>
                   <Input
-                    id="facebook_url"
-                    value={formData.facebook_url}
-                    onChange={(e) => setFormData({ ...formData, facebook_url: e.target.value })}
+                    id="facebookUrl"
+                    value={formData.facebookUrl}
+                    onChange={(e) => setFormData({ ...formData, facebookUrl: e.target.value })}
                     placeholder="https://www.facebook.com/yourpage"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="instagram_url">Instagram Profile URL</Label>
+                  <Label htmlFor="instagramUrl">Instagram Profile URL</Label>
                   <Input
-                    id="instagram_url"
-                    value={formData.instagram_url}
-                    onChange={(e) => setFormData({ ...formData, instagram_url: e.target.value })}
+                    id="instagramUrl"
+                    value={formData.instagramUrl}
+                    onChange={(e) => setFormData({ ...formData, instagramUrl: e.target.value })}
                     placeholder="https://www.instagram.com/yourprofile"
                   />
                 </div>

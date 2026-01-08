@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getChurchInfo, createContactSubmission } from "@/integrations/firebase/firestore/church";
 import { MapPin, Phone, Mail, Send, CheckCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -48,26 +48,16 @@ export function ContactSection() {
 
   const { data: churchInfo } = useQuery({
     queryKey: ["church-info-contact"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("church_info")
-        .select("*")
-        .maybeSingle();
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getChurchInfo,
   });
 
   const submitMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const { error } = await supabase.from("contact_submissions").insert({
+      await createContactSubmission({
         name: data.name.trim(),
         email: data.email.trim(),
         message: data.message.trim(),
       });
-
-      if (error) throw error;
     },
     onSuccess: () => {
       setIsSubmitted(true);

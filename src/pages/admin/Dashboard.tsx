@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
+import { getUserProfile } from "@/integrations/firebase/firestore/users";
+import { getActiveEvents, getActiveVideos, getContactSubmissions } from "@/integrations/firebase/firestore/church";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar, Video, MessageSquare, Users } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,23 +19,21 @@ const TITLES: Record<string, string> = {
 };
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
+  const { user } = useFirebaseAuth();
 
   // Fetch admin profile for personalized welcome
   const { data: profile } = useQuery({
-    queryKey: ["admin-profile", user?.id],
+    queryKey: ["admin-profile", user?.uid],
     queryFn: async () => {
-      if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("first_name, last_name, title")
-        .eq("id", user.id)
-        .single();
-
-      if (error) throw error;
-      return data;
+      if (!user?.uid) return null;
+      const data = await getUserProfile(user.uid);
+      return data ? {
+        first_name: data.firstName,
+        last_name: data.lastName,
+        title: data.title
+      } : null;
     },
-    enabled: !!user?.id,
+    enabled: !!user?.uid,
   });
 
   const { data: eventsCount, isLoading: eventsLoading } = useQuery({

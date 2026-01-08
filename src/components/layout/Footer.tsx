@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getChurchInfo } from "@/integrations/firebase/firestore/church";
 import { Facebook, Youtube, Instagram, Mail, Phone, MapPin } from "lucide-react";
 
 const quickLinks = [
@@ -13,15 +13,7 @@ const quickLinks = [
 export function Footer() {
   const { data: churchInfo } = useQuery({
     queryKey: ["church-info-footer"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("church_info")
-        .select("*")
-        .maybeSingle();
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getChurchInfo,
   });
 
   const socialLinks = [

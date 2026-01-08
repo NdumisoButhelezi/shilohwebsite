@@ -3,9 +3,9 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider } from "@/hooks/useAuth";
+import { FirebaseAuthProvider } from "@/hooks/useFirebaseAuth";
 import Index from "./pages/Index";
-import Auth from "./pages/Auth";
+import FirebaseAuth from "./pages/FirebaseAuth";
 import Gallery from "./pages/Gallery";
 import PublicEvents from "./pages/Events";
 import AdminLayout from "./pages/admin/AdminLayout";
@@ -17,22 +17,26 @@ import Settings from "./pages/admin/Settings";
 import Admins from "./pages/admin/Admins";
 import AdminGallery from "./pages/admin/Gallery";
 import AdminProfile from "./pages/admin/Profile";
+import SetupAdmin from "./pages/admin/SetupAdmin";
+import SeedAdmin from "./pages/SeedAdmin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <AuthProvider>
+    <FirebaseAuthProvider>
       <TooltipProvider>
         <Toaster />
         <Sonner />
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/auth" element={<Auth />} />
+            <Route path="/auth" element={<FirebaseAuth />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/events" element={<PublicEvents />} />
+            <Route path="/seed-admin" element={<SeedAdmin />} />
+            <Route path="/setup-admin" element={<SetupAdmin />} />
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<Dashboard />} />
               <Route path="profile" element={<AdminProfile />} />
@@ -48,7 +52,7 @@ const App = () => (
           </Routes>
         </BrowserRouter>
       </TooltipProvider>
-    </AuthProvider>
+    </FirebaseAuthProvider>
   </QueryClientProvider>
 );
 

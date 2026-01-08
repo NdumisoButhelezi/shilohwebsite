@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getActiveEvents } from "@/integrations/firebase/firestore/church";
 import { Calendar, Clock, MapPin, ArrowRight } from "lucide-react";
+import { Timestamp } from "firebase/firestore";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,16 +21,18 @@ export function EventsSection() {
   const { data: events, isLoading } = useQuery({
     queryKey: ["events"],
     queryFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .gte("event_date", today)
-        .order("event_date", { ascending: true })
-        .limit(4);
-
-      if (error) throw error;
-      return data;
+      const allEvents = await getActiveEvents();
+      // Filter for upcoming events and limit to 4
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return allEvents
+        .filter(event => {
+          const eventDate = event.eventDate instanceof Date 
+            ? event.eventDate 
+            : (event.eventDate as any).toDate();
+          return eventDate >= today;
+        })
+        .slice(0, 4);
     },
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -87,7 +90,10 @@ export function EventsSection() {
             ))
           ) : events && events.length > 0 ? (
             events.map((event) => {
-              const eventDate = parseISO(event.event_date);
+              // Convert Firebase Timestamp to Date
+              const eventDate = event.eventDate instanceof Date 
+                ? event.eventDate 
+                : (event.eventDate as any).toDate();
               return (
                 <Card
                   key={event.id}
@@ -112,9 +118,9 @@ export function EventsSection() {
                       <div className="flex items-center gap-2 mb-3">
                         <Badge 
                           variant="secondary" 
-                          className={eventTypeColors[event.event_type || "general"]}
+                          className={eventTypeColors[event.eventType || "general"]}
                         >
-                          {(event.event_type || "general").charAt(0).toUpperCase() + (event.event_type || "general").slice(1)}
+                          {(event.eventType || "general").charAt(0).toUpperCase() + (event.eventType || "general").slice(1)}
                         </Badge>
                       </div>
 
@@ -131,7 +137,7 @@ export function EventsSection() {
                       <div className="flex flex-col gap-2 text-sm text-muted-foreground">
                         <div className="flex items-center gap-2">
                           <Clock className="h-4 w-4 text-primary" />
-                          <span>{formatTime(event.start_time, event.end_time)}</span>
+                          <span>{formatTime(event.startTime, event.endTime || null)}</span>
                         </div>
                         {event.location && (
                           <div className="flex items-center gap-2">

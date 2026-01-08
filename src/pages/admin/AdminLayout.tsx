@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { useNavigate, Outlet, Link, useLocation } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useQuery } from "@tanstack/react-query";
 import { usePendingRequests } from "@/hooks/usePendingRequests";
-import { supabase } from "@/integrations/supabase/client";
+import { getUserProfile } from "@/integrations/firebase/firestore/users";
+import { getContactSubmissions } from "@/integrations/firebase/firestore/church";
 import { Button } from "@/components/ui/button";
 import { 
   LayoutDashboard, 
@@ -53,7 +54,7 @@ const navItems: NavItem[] = [
 ];
 
 export default function AdminLayout() {
-  const { user, isAdmin, isLoading, signOut } = useAuth();
+  const { user, isAdmin, isLoading, signOut } = useFirebaseAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -63,32 +64,30 @@ export default function AdminLayout() {
 
   // Fetch admin profile for avatar
   const { data: profile } = useQuery({
-    queryKey: ["admin-profile", user?.id],
+    queryKey: ["admin-profile", user?.uid],
     queryFn: async () => {
-      if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("first_name, last_name, avatar_url, title")
-        .eq("id", user.id)
-        .single();
-
-      if (error) throw error;
-      return data;
+      if (!user?.uid) return null;
+      const userData = await getUserProfile(user.uid);
+      
+      if (!userData) return null;
+      
+      // Map Firebase user data to expected format
+      return {
+        first_name: userData.firstName || '',
+        last_name: userData.lastName || '',
+        avatar_url: userData.photoURL || user.photoURL || '',
+        title: userData.title || ''
+      };
     },
-    enabled: !!user?.id,
+    enabled: !!user?.uid,
   });
 
   // Fetch unread messages count
   const { data: unreadCount = 0 } = useQuery({
     queryKey: ["unread-messages-count"],
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("contact_submissions")
-        .select("*", { count: "exact", head: true })
-        .eq("is_read", false);
-
-      if (error) throw error;
-      return count || 0;
+      const submissions = await getContactSubmissions(true); // true = only unread
+      return submissions.length;
     },
     refetchInterval: 30000, // Refetch every 30 seconds
   });

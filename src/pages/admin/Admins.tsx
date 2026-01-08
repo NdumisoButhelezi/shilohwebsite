@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { getAllAdmins, getUsersByRole, getUserProfile, getPendingAdminRequests, approveAdminRequest, denyAdminRequest } from "@/integrations/firebase/firestore/users";
 import { usePendingRequests } from "@/hooks/usePendingRequests";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,14 +35,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Plus, Trash2, UserCog, Loader2, Check, X, Clock, UserPlus } from "lucide-react";
-import { useAuth } from "@/hooks/useAuth";
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface AdminUser {
   id: string;
-  user_id: string;
+  userId: string;
   email: string;
-  created_at: string;
+  createdAt: string;
 }
 
 export default function Admins() {
@@ -52,7 +52,7 @@ export default function Admins() {
   const [newAdminEmail, setNewAdminEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const { user } = useAuth();
+  const { user } = useFirebaseAuth();
   const queryClient = useQueryClient();
   const { pendingRequests, pendingCount, refetch: refetchPending } = usePendingRequests();
 
@@ -63,27 +63,21 @@ export default function Admins() {
   const fetchAdmins = async () => {
     setIsLoading(true);
     try {
-      const { data: roles, error: rolesError } = await supabase
-        .from("user_roles")
-        .select("id, user_id, created_at")
-        .eq("role", "admin");
+      const roles = await getAllAdmins();
 
-      if (rolesError) throw rolesError;
-
-      const userIds = (roles || []).map((r) => r.user_id);
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, email")
-        .in("id", userIds);
-
-      const profileMap = new Map(profiles?.map((p) => [p.id, p.email]) || []);
-
-      const adminsWithEmail: AdminUser[] = (roles || []).map((role) => ({
-        id: role.id,
-        user_id: role.user_id,
-        email: profileMap.get(role.user_id) || role.user_id,
-        created_at: role.created_at,
-      }));
+      const adminsWithEmail: AdminUser[] = await Promise.all(
+        roles.map(async (role) => {
+          const profile = await getUserProfile(role.userId);
+          return {
+            id: role.userId,
+            userId: role.userId,
+            email: profile?.email || role.userId,
+            createdAt: role.assignedAt instanceof Date 
+              ? role.assignedAt.toISOString() 
+              : (role.assignedAt as any).toDate().toISOString(),
+          };
+        })
+      );
 
       setAdmins(adminsWithEmail);
     } catch (error: unknown) {
@@ -96,49 +90,26 @@ export default function Admins() {
 
   const handleAddAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAdminEmail.trim()) {
+    if (!newAdminEmail.trim() || !user?.uid) {
       toast.error("Please enter an email address");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("email", newAdminEmail.trim().toLowerCase())
-        .maybeSingle();
+      // In Firebase, we need to search for user by email in the users collection
+      // This is a simplified version - you may need to implement a cloud function
+      // to search users by email since Firebase doesn't provide this directly
+      toast.error("Please ask the user to request admin access through the sign-up page");
+      setIsSubmitting(false);
+      return;
 
-      if (!profile) {
-        toast.error("No user found with that email. They must sign up first.");
-        setIsSubmitting(false);
-        return;
-      }
-
-      const { data: existing } = await supabase
-        .from("user_roles")
-        .select("id")
-        .eq("user_id", profile.id)
-        .eq("role", "admin")
-        .maybeSingle();
-
-      if (existing) {
-        toast.error("User is already an admin");
-        setIsSubmitting(false);
-        return;
-      }
-
-      const { error } = await supabase.from("user_roles").insert({
-        user_id: profile.id,
-        role: "admin",
-      });
-
-      if (error) throw error;
-
-      toast.success("Admin added successfully");
-      setNewAdminEmail("");
-      setIsAddDialogOpen(false);
-      fetchAdmins();
+      // Alternatively, if you have implemented a cloud function to add admins:
+      // await setUserRole(userId, 'admin', user.uid);
+      // toast.success("Admin added successfully");
+      // setNewAdminEmail("");
+      // setIsAddDialogOpen(false);
+      // fetchAdmins();
     } catch (error: unknown) {
       const errMessage = error instanceof Error ? error.message : "Failed to add admin";
       toast.error(errMessage);
@@ -149,20 +120,27 @@ export default function Admins() {
   };
 
   const handleRemoveAdmin = async (adminId: string, adminUserId: string) => {
-    if (adminUserId === user?.id) {
+    if (adminUserId === user?.uid) {
       toast.error("You cannot remove your own admin access");
       return;
     }
 
     setProcessingId(adminId);
     try {
-      // Call edge function to completely delete the user from the system
-      const { data, error } = await supabase.functions.invoke("delete-user", {
-        body: { userId: adminUserId },
+      // Call Netlify function to completely delete the user from the system
+      const response = await fetch("/.netlify/functions/delete-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId: adminUserId }),
       });
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to remove user");
+      }
 
       toast.success("User completely removed from system");
       fetchAdmins();
@@ -176,27 +154,11 @@ export default function Admins() {
   };
 
   const handleApproveRequest = async (requestId: string, userId: string, email: string) => {
+    if (!user?.uid) return;
+    
     setProcessingId(requestId);
     try {
-      // Add admin role
-      const { error: roleError } = await supabase.from("user_roles").insert({
-        user_id: userId,
-        role: "admin",
-      });
-
-      if (roleError) throw roleError;
-
-      // Update request status
-      const { error: updateError } = await supabase
-        .from("admin_requests")
-        .update({
-          status: "approved",
-          reviewed_at: new Date().toISOString(),
-          reviewed_by: user?.id,
-        })
-        .eq("id", requestId);
-
-      if (updateError) throw updateError;
+      await approveAdminRequest(requestId, userId, user.uid);
 
       toast.success(`${email} has been approved as admin`);
       refetchPending();
@@ -214,13 +176,20 @@ export default function Admins() {
   const handleRejectRequest = async (requestId: string, userId: string, email: string) => {
     setProcessingId(requestId);
     try {
-      // Completely delete the user from the system
-      const { data, error } = await supabase.functions.invoke("delete-user", {
-        body: { userId },
+      // Completely delete the user from the system via Netlify function
+      const response = await fetch("/.netlify/functions/delete-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId }),
       });
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to reject request");
+      }
 
       toast.success(`Request from ${email} has been rejected and user removed`);
       refetchPending();
@@ -339,8 +308,8 @@ export default function Admins() {
                     <TableRow key={request.id}>
                       <TableCell className="font-medium">{request.email}</TableCell>
                       <TableCell>
-                        {new Date(request.created_at).toLocaleDateString()} at{" "}
-                        {new Date(request.created_at).toLocaleTimeString([], {
+                        {new Date(request.createdAt instanceof Date ? request.createdAt : (request.createdAt as any).toDate()).toLocaleDateString()} at{" "}
+                        {new Date(request.createdAt instanceof Date ? request.createdAt : (request.createdAt as any).toDate()).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
@@ -350,7 +319,7 @@ export default function Admins() {
                           <Button
                             size="sm"
                             onClick={() =>
-                              handleApproveRequest(request.id, request.user_id, request.email)
+                              handleApproveRequest(request.id || '', request.userId, request.email)
                             }
                             disabled={processingId === request.id}
                             className="bg-green-600 hover:bg-green-700"
@@ -389,7 +358,7 @@ export default function Admins() {
                                 <AlertDialogAction
                                   onClick={(e) => {
                                     e.preventDefault();
-                                    handleRejectRequest(request.id, request.user_id, request.email);
+                                    handleRejectRequest(request.id || '', request.userId, request.email);
                                   }}
                                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                                 >
@@ -436,12 +405,12 @@ export default function Admins() {
                     <TableRow key={admin.id}>
                       <TableCell>
                         {admin.email}
-                        {admin.user_id === user?.id && (
+                        {admin.userId === user?.uid && (
                           <span className="ml-2 text-xs text-muted-foreground">(You)</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        {new Date(admin.created_at).toLocaleDateString()}
+                        {new Date(admin.createdAt).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
                         <AlertDialog>
@@ -450,7 +419,7 @@ export default function Admins() {
                               variant="ghost"
                               size="icon"
                               className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              disabled={admin.user_id === user?.id || processingId === admin.id}
+                              disabled={admin.userId === user?.uid || processingId === admin.id}
                             >
                               {processingId === admin.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -473,7 +442,7 @@ export default function Admins() {
                               <AlertDialogAction
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  handleRemoveAdmin(admin.id, admin.user_id);
+                                  handleRemoveAdmin(admin.id, admin.userId);
                                 }}
                                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                               >

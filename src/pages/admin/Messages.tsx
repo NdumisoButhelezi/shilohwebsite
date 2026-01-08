@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getContactSubmissions, markContactSubmissionAsRead, deleteContactSubmission } from "@/integrations/firebase/firestore/church";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,25 +13,11 @@ export default function AdminMessages() {
 
   const { data: messages, isLoading } = useQuery({
     queryKey: ["admin-messages"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("contact_submissions")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getContactSubmissions,
   });
 
   const markReadMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("contact_submissions")
-        .update({ is_read: true })
-        .eq("id", id);
-      if (error) throw error;
-    },
+    mutationFn: markContactSubmissionAsRead,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
       toast.success("Marked as read");
@@ -39,13 +25,7 @@ export default function AdminMessages() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("contact_submissions")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
-    },
+    mutationFn: deleteContactSubmission,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-messages"] });
       toast.success("Message deleted");
@@ -53,7 +33,7 @@ export default function AdminMessages() {
     onError: () => toast.error("Failed to delete message"),
   });
 
-  const unreadCount = messages?.filter((m) => !m.is_read).length || 0;
+  const unreadCount = messages?.filter((m) => !m.isRead).length || 0;
 
   return (
     <div>
@@ -88,14 +68,14 @@ export default function AdminMessages() {
           {messages.map((message) => (
             <Card
               key={message.id}
-              className={`border-0 shadow-md ${!message.is_read ? "ring-2 ring-primary/20" : ""}`}
+              className={`border-0 shadow-md ${!message.isRead ? "ring-2 ring-primary/20" : ""}`}
             >
               <CardContent className="p-6">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="font-semibold text-foreground">{message.name}</h3>
-                      {!message.is_read && (
+                      {!message.isRead && (
                         <Badge variant="secondary" className="bg-primary/10 text-primary text-xs">
                           New
                         </Badge>
@@ -110,11 +90,11 @@ export default function AdminMessages() {
                     </a>
                     <p className="text-muted-foreground whitespace-pre-wrap">{message.message}</p>
                     <p className="text-xs text-muted-foreground mt-4">
-                      Received: {format(new Date(message.created_at), "MMMM d, yyyy 'at' h:mm a")}
+                      Received: {format(message.createdAt instanceof Date ? message.createdAt : message.createdAt.toDate(), "MMMM d, yyyy 'at' h:mm a")}
                     </p>
                   </div>
                   <div className="flex flex-col gap-2">
-                    {!message.is_read && (
+                    {!message.isRead && (
                       <Button
                         variant="ghost"
                         size="icon"

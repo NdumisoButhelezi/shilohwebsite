@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getAllVideos, createVideo, updateVideo, deleteVideo, updateVideoOrder } from "@/integrations/firebase/firestore/church";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,26 +46,19 @@ export default function AdminVideos() {
 
   const { data: videos, isLoading } = useQuery({
     queryKey: ["admin-videos"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("videos")
-        .select("*")
-        .order("display_order", { ascending: true });
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getAllVideos,
   });
 
   const createMutation = useMutation({
     mutationFn: async (data: VideoFormData) => {
-      const maxOrder = videos?.length ? Math.max(...videos.map(v => v.display_order || 0)) : 0;
-      const { error } = await supabase.from("videos").insert({
-        ...data,
-        youtube_video_id: extractYouTubeId(data.youtube_video_id),
-        display_order: maxOrder + 1,
+      const maxOrder = videos?.length ? Math.max(...videos.map(v => v.displayOrder || 0)) : 0;
+      await createVideo({
+        title: data.title,
+        youtubeVideoId: extractYouTubeId(data.youtube_video_id),
+        description: data.description,
+        isActive: data.is_active,
+        displayOrder: maxOrder + 1,
       });
-      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-videos"] });
@@ -78,14 +71,12 @@ export default function AdminVideos() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: VideoFormData }) => {
-      const { error } = await supabase
-        .from("videos")
-        .update({
-          ...data,
-          youtube_video_id: extractYouTubeId(data.youtube_video_id),
-        })
-        .eq("id", id);
-      if (error) throw error;
+      await updateVideo(id, {
+        title: data.title,
+        youtubeVideoId: extractYouTubeId(data.youtube_video_id),
+        description: data.description,
+        isActive: data.is_active,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-videos"] });
@@ -98,10 +89,7 @@ export default function AdminVideos() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("videos").delete().eq("id", id);
-      if (error) throw error;
-    },
+    mutationFn: deleteVideo,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-videos"] });
       toast.success("Video deleted successfully");
@@ -122,9 +110,9 @@ export default function AdminVideos() {
     setEditingVideo(video.id);
     setFormData({
       title: video.title,
-      youtube_video_id: video.youtube_video_id,
+      youtube_video_id: video.youtubeVideoId,
       description: video.description || "",
-      is_active: video.is_active ?? true,
+      is_active: video.isActive ?? true,
     });
     setIsDialogOpen(true);
   };

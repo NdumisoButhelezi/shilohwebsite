@@ -3,7 +3,7 @@ import { Menu, X, LogIn, LogOut, User } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/useAuth";
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
 import logo from "@/assets/logo.jpg";
 
 const navLinks = [
@@ -17,7 +17,7 @@ const navLinks = [
 export function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const { user, signOut } = useAuth();
+  const { user, signOut } = useFirebaseAuth();
 
   useEffect(() => {
     const handleScroll = () => {

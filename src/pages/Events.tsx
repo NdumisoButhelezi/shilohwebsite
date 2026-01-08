@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getActiveEvents } from "@/integrations/firebase/firestore/church";
+import { Timestamp } from "firebase/firestore";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { Card, CardContent } from "@/components/ui/card";

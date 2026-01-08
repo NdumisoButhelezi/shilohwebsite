@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getChurchInfo, getActiveServiceTimes } from "@/integrations/firebase/firestore/church";
 import { Heart, Target, Eye, Clock, MapPin, Phone, Mail } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -24,28 +24,12 @@ const values = [
 export function AboutSection() {
   const { data: churchInfo } = useQuery({
     queryKey: ["church-info-about"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("church_info")
-        .select("*")
-        .maybeSingle();
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getChurchInfo,
   });
 
   const { data: serviceTimes } = useQuery({
     queryKey: ["service-times"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("service_times")
-        .select("*")
-        .order("display_order", { ascending: true });
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getActiveServiceTimes,
   });
 
   const formatTime = (time: string) => {

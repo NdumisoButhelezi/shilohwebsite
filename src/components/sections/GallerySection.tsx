@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getActiveVideos, getChurchInfo } from "@/integrations/firebase/firestore/church";
 import { Play, ExternalLink, Video, Image } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,28 +9,14 @@ export function GallerySection() {
   const { data: videos, isLoading } = useQuery({
     queryKey: ["videos"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("videos")
-        .select("*")
-        .order("display_order", { ascending: true })
-        .limit(6);
-
-      if (error) throw error;
-      return data;
+      const allVideos = await getActiveVideos();
+      return allVideos.slice(0, 6); // Limit to 6
     },
   });
 
   const { data: churchInfo } = useQuery({
     queryKey: ["church-info"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("church_info")
-        .select("youtube_channel_url")
-        .maybeSingle();
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getChurchInfo,
   });
 
   const openVideo = (videoId: string) => {
@@ -68,17 +54,17 @@ export function GallerySection() {
               <Card
                 key={video.id}
                 className="border-0 shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden group cursor-pointer"
-                onClick={() => openVideo(video.youtube_video_id)}
+                onClick={() => openVideo(video.youtubeVideoId)}
               >
                 <CardContent className="p-0">
                   {/* Thumbnail */}
                   <div className="relative aspect-video bg-muted overflow-hidden">
                     <img
-                      src={`https://img.youtube.com/vi/${video.youtube_video_id}/maxresdefault.jpg`}
+                      src={`https://img.youtube.com/vi/${video.youtubeVideoId}/maxresdefault.jpg`}
                       alt={video.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${video.youtube_video_id}/hqdefault.jpg`;
+                        (e.target as HTMLImageElement).src = `https://img.youtube.com/vi/${video.youtubeVideoId}/hqdefault.jpg`;
                       }}
                     />
                     {/* Play Overlay */}

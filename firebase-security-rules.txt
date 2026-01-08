@@ -1,0 +1,222 @@
+// Firestore Security Rules for Shiloh Intercession Mountain Website
+// Deploy these rules in Firebase Console > Firestore Database > Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/user_roles/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_roles/$(request.auth.uid)).data.role in ['admin', 'super_admin'];
+    }
+    
+    function isSuperAdmin() {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/user_roles/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_roles/$(request.auth.uid)).data.role == 'super_admin';
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // ===== USERS COLLECTION =====
+    match /users/{userId} {
+      // Anyone can read user profiles
+      allow read: if true;
+      
+      // Users can create their own profile (on sign-up)
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId;
+      
+      // Users can update their own profile, admins can update any profile
+      allow update: if isOwner(userId) || isAdmin();
+      
+      // Only super admins can delete users
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ===== USER ROLES COLLECTION =====
+    match /user_roles/{userId} {
+      // Anyone can read roles (needed to check if user is admin)
+      allow read: if true;
+      
+      // Only admins can assign roles
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      
+      // Only super admins can delete roles
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ===== ADMIN REQUESTS COLLECTION =====
+    match /admin_requests/{userId} {
+      // Users can read their own request, admins can read all
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Users can create their own request
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId &&
+                      request.resource.data.status == 'pending';
+      
+      // Only admins can update requests (approve/reject)
+      allow update: if isAdmin();
+      
+      // Only admins can delete requests
+      allow delete: if isAdmin();
+    }
+    
+    // ===== EVENTS COLLECTION =====
+    match /events/{eventId} {
+      // Anyone can read active events
+      allow read: if resource.data.isActive == true || isAdmin();
+      
+      // Only admins can create/update/delete events
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // ===== VIDEOS COLLECTION =====
+    match /videos/{videoId} {
+      // Anyone can read active videos
+      allow read: if resource.data.isActive == true || isAdmin();
+      
+      // Only admins can create/update/delete videos
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // ===== CONTACT SUBMISSIONS COLLECTION =====
+    match /contact_submissions/{submissionId} {
+      // Only admins can read contact submissions
+      allow read: if isAdmin();
+      
+      // Anyone can create a contact submission
+      allow create: if true;
+      
+      // Only admins can update (mark as read) or delete
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // ===== CHURCH INFO COLLECTION =====
+    match /church_info/{infoId} {
+      // Anyone can read church info
+      allow read: if true;
+      
+      // Only admins can create/update church info
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      
+      // Only super admins can delete church info
+      allow delete: if isSuperAdmin();
+    }
+    
+    // ===== SERVICE TIMES COLLECTION =====
+    match /service_times/{timeId} {
+      // Anyone can read active service times
+      allow read: if resource.data.isActive == true || isAdmin();
+      
+      // Only admins can create/update/delete service times
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // ===== GALLERY ALBUMS COLLECTION =====
+    match /gallery_albums/{albumId} {
+      // Anyone can read active albums
+      allow read: if resource.data.isActive == true || isAdmin();
+      
+      // Only admins can create/update/delete albums
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // ===== GALLERY IMAGES COLLECTION =====
+    match /gallery_images/{imageId} {
+      // Anyone can read images from active albums
+      allow read: if true; // Could be restricted based on album status
+      
+      // Only admins can create/update/delete images
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // ===== DEFAULT DENY =====
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// Firebase Storage Rules
+// Deploy these rules in Firebase Console > Storage > Rules
+// 
+// rules_version = '2';
+// service firebase.storage {
+//   match /b/{bucket}/o {
+//     
+//     // Helper functions
+//     function isSignedIn() {
+//       return request.auth != null;
+//     }
+//     
+//     function isAdmin() {
+//       return isSignedIn() && 
+//         firestore.get(/databases/(default)/documents/user_roles/$(request.auth.uid)).data.role in ['admin', 'super_admin'];
+//     }
+//     
+//     // Gallery images
+//     match /gallery/{albumId}/{imageId} {
+//       // Anyone can read
+//       allow read: if true;
+//       
+//       // Only admins can upload
+//       allow create: if isAdmin() && 
+//                       request.resource.size < 10 * 1024 * 1024 && // Max 10MB
+//                       request.resource.contentType.matches('image/.*');
+//       
+//       // Only admins can update/delete
+//       allow update, delete: if isAdmin();
+//     }
+//     
+//     // User avatars
+//     match /avatars/{userId}/{fileName} {
+//       // Anyone can read
+//       allow read: if true;
+//       
+//       // Users can upload their own avatar, admins can upload any
+//       allow create: if (isSignedIn() && request.auth.uid == userId) || isAdmin();
+//       allow update: if (isSignedIn() && request.auth.uid == userId) || isAdmin();
+//       
+//       // Users can delete their own avatar, admins can delete any
+//       allow delete: if (isSignedIn() && request.auth.uid == userId) || isAdmin();
+//     }
+//     
+//     // Event images
+//     match /events/{eventId}/{fileName} {
+//       // Anyone can read
+//       allow read: if true;
+//       
+//       // Only admins can upload/update/delete
+//       allow create, update, delete: if isAdmin();
+//     }
+//     
+//     // Default deny
+//     match /{allPaths=**} {
+//       allow read, write: if false;
+//     }
+//   }
+// }

@@ -1,16 +1,18 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getPendingAdminRequests } from "@/integrations/firebase/firestore/users";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { db } from "@/integrations/firebase/client";
 import { toast } from "sonner";
 
 interface AdminRequest {
   id: string;
-  user_id: string;
+  userId: string;
   email: string;
   status: string;
-  created_at: string;
-  reviewed_at: string | null;
-  reviewed_by: string | null;
+  createdAt: Date;
+  reviewedAt: Date | null;
+  reviewedBy: string | null;
 }
 
 export function usePendingRequests() {
@@ -19,67 +21,41 @@ export function usePendingRequests() {
   const { data: pendingRequests = [], ...queryResult } = useQuery({
     queryKey: ["pending-admin-requests"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("admin_requests")
-        .select("*")
-        .eq("status", "pending")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      return data as AdminRequest[];
+      const requests = await getPendingAdminRequests();
+      return requests.map(req => ({
+        id: req.id || req.userId,
+        userId: req.userId,
+        email: req.email,
+        status: req.status,
+        createdAt: req.createdAt instanceof Date ? req.createdAt : new Date(),
+        reviewedAt: req.reviewedAt instanceof Date ? req.reviewedAt : null,
+        reviewedBy: req.reviewedBy || null
+      })) as AdminRequest[];
     },
     refetchInterval: 30000, // Background refresh every 30 seconds
   });
 
-  // Set up realtime subscription for new requests
+  // Set up Firestore realtime listener for new requests
   useEffect(() => {
-    const channel = supabase
-      .channel("admin-requests-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "admin_requests",
-        },
-        (payload) => {
-          // Show toast notification for new request
-          const newRequest = payload.new as AdminRequest;
+    const requestsRef = collection(db, 'admin_requests');
+    const q = query(requestsRef, where('status', '==', 'pending'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const newRequest = change.doc.data();
           toast.info(`New admin request from ${newRequest.email}`, {
             description: "Review the request in the Admins page",
             duration: 5000,
           });
-          // Refetch to update the count
-          queryClient.invalidateQueries({ queryKey: ["pending-admin-requests"] });
         }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "admin_requests",
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["pending-admin-requests"] });
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "admin_requests",
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["pending-admin-requests"] });
-        }
-      )
-      .subscribe();
+      });
+      
+      // Refetch to update the count
+      queryClient.invalidateQueries({ queryKey: ["pending-admin-requests"] });
+    });
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => unsubscribe();
   }, [queryClient]);
 
   return {

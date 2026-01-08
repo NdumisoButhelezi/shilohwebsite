@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
+import { getAdminRequestStatus, createAdminRequest } from "@/integrations/firebase/firestore/users";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,7 +43,7 @@ export default function Auth() {
   const [requestStatus, setRequestStatus] = useState<RequestStatus>("none");
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
-  const { signIn, signUp, signOut, user, isAdmin } = useAuth();
+  const { signIn, signInWithGoogle, signUp, signOut, user, isAdmin } = useFirebaseAuth();
   const navigate = useNavigate();
 
   // Check request status for logged-in non-admin users
@@ -51,15 +51,15 @@ export default function Auth() {
     const checkRequestStatus = async () => {
       if (user && !isAdmin) {
         setIsCheckingStatus(true);
-        const { data } = await supabase
-          .from("admin_requests")
-          .select("status")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        
-        if (data) {
-          setRequestStatus(data.status as RequestStatus);
-        } else {
+        try {
+          const request = await getAdminRequestStatus(user.uid);
+          if (request) {
+            setRequestStatus(request.status as RequestStatus);
+          } else {
+            setRequestStatus("none");
+          }
+        } catch (error) {
+          console.error("Error checking request status:", error);
           setRequestStatus("none");
         }
         setIsCheckingStatus(false);

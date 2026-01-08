@@ -1,7 +1,9 @@
 import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/useAuth";
+import { useFirebaseAuth } from "@/hooks/useFirebaseAuth";
+import { getUserProfile, updateUserProfile as updateProfileInDb } from "@/integrations/firebase/firestore/users";
+import { updateUserEmail, updateUserPassword, reauthenticateUser } from "@/integrations/firebase/auth";
+import { uploadFile, deleteFile } from "@/integrations/firebase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,7 +39,7 @@ const TITLES = [
 ];
 
 export default function AdminProfile() {
-  const { user } = useAuth();
+  const { user } = useFirebaseAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -73,36 +75,19 @@ export default function AdminProfile() {
 
   // Fetch profile data
   const { data: profile, isLoading } = useQuery({
-    queryKey: ["admin-profile", user?.id],
+    queryKey: ["admin-profile", user?.uid],
     queryFn: async () => {
-      if (!user?.id) return null;
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .single();
-
-      if (error) throw error;
-      return data;
+      if (!user?.uid) return null;
+      return await getUserProfile(user.uid);
     },
-    enabled: !!user?.id,
+    enabled: !!user?.uid,
   });
 
   // Set initial values when profile loads
-  useState(() => {
-    if (profile) {
-      setFirstName(profile.first_name || "");
-      setLastName(profile.last_name || "");
-      setPhone(profile.phone || "");
-      setTitle(profile.title || "");
-    }
-  });
-
-  // Update form when profile loads
   if (profile && !firstName && !lastName && !phone && !title) {
-    if (profile.first_name) setFirstName(profile.first_name);
-    if (profile.last_name) setLastName(profile.last_name);
-    if (profile.phone) setPhone(profile.phone);
+    if (profile.firstName) setFirstName(profile.firstName);
+    if (profile.lastName) setLastName(profile.lastName);
+    if (profile.phoneNumber) setPhone(profile.phoneNumber);
     if (profile.title) setTitle(profile.title);
   }
 
@@ -155,37 +140,21 @@ export default function AdminProfile() {
 
   // Handle cropped image upload
   const handleCroppedUpload = async (croppedBlob: Blob) => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
 
     setIsUploadingAvatar(true);
 
     try {
-      const fileName = `${user.id}/avatar.jpg`;
+      const storagePath = `avatars/${user.uid}/avatar.jpg`;
 
-      // Delete old avatar if exists
-      await supabase.storage.from("avatars").remove([`${user.id}/avatar.jpg`, `${user.id}/avatar.png`, `${user.id}/avatar.jpeg`, `${user.id}/avatar.webp`]);
+      // Upload cropped avatar to Firebase Storage
+      const avatarUrl = await uploadFile(storagePath, croppedBlob, "image/jpeg");
 
-      // Upload cropped avatar
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(fileName, croppedBlob, { upsert: true, contentType: "image/jpeg" });
+      // Add cache-busting timestamp
+      const avatarUrlWithTimestamp = `${avatarUrl}?t=${Date.now()}`;
 
-      if (uploadError) throw uploadError;
-
-      // Get public URL with cache-busting timestamp
-      const { data: urlData } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(fileName);
-
-      const avatarUrlWithTimestamp = `${urlData.publicUrl}?t=${Date.now()}`;
-
-      // Update profile with avatar URL
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: avatarUrlWithTimestamp })
-        .eq("id", user.id);
-
-      if (updateError) throw updateError;
+      // Update profile with avatar URL in Firestore
+      await updateProfileInDb(user.uid, { photoURL: avatarUrlWithTimestamp });
 
       await queryClient.invalidateQueries({ queryKey: ["admin-profile"] });
       setCropperOpen(false);
@@ -207,26 +176,17 @@ export default function AdminProfile() {
 
   // Handle avatar deletion
   const handleDeleteAvatar = async () => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
 
     setIsDeletingAvatar(true);
 
     try {
-      // Delete avatar files
-      await supabase.storage.from("avatars").remove([
-        `${user.id}/avatar.jpg`,
-        `${user.id}/avatar.png`,
-        `${user.id}/avatar.jpeg`,
-        `${user.id}/avatar.webp`
-      ]);
+      // Delete avatar file from Firebase Storage
+      const storagePath = `avatars/${user.uid}/avatar.jpg`;
+      await deleteFile(storagePath);
 
       // Update profile to remove avatar URL
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: null })
-        .eq("id", user.id);
-
-      if (updateError) throw updateError;
+      await updateProfileInDb(user.uid, { photoURL: null });
 
       await queryClient.invalidateQueries({ queryKey: ["admin-profile"] });
       setDeleteDialogOpen(false);
@@ -247,22 +207,17 @@ export default function AdminProfile() {
 
   // Handle profile update
   const handleProfileSave = async () => {
-    if (!user?.id) return;
+    if (!user?.uid) return;
 
     setIsProfileSaving(true);
 
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          first_name: firstName.trim() || null,
-          last_name: lastName.trim() || null,
-          phone: phone.trim() || null,
-          title: title || null,
-        })
-        .eq("id", user.id);
-
-      if (error) throw error;
+      await updateProfileInDb(user.uid, {
+        firstName: firstName.trim() || undefined,
+        lastName: lastName.trim() || undefined,
+        phoneNumber: phone.trim() || undefined,
+        title: title || undefined,
+      });
 
       await queryClient.invalidateQueries({ queryKey: ["admin-profile"] });
       toast({
@@ -295,12 +250,9 @@ export default function AdminProfile() {
 
     try {
       // First verify current password by re-authenticating
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user?.email || "",
-        password: emailPassword,
-      });
+      const { error: reAuthError } = await reauthenticateUser(emailPassword);
 
-      if (signInError) {
+      if (reAuthError) {
         toast({
           title: "Incorrect password",
           description: "The password you entered is incorrect",
@@ -311,9 +263,7 @@ export default function AdminProfile() {
       }
 
       // Update email
-      const { error } = await supabase.auth.updateUser({
-        email: newEmail.trim(),
-      });
+      const { error } = await updateUserEmail(newEmail.trim());
 
       if (error) throw error;
 
@@ -369,28 +319,23 @@ export default function AdminProfile() {
     setIsPasswordSaving(true);
 
     try {
-      // Verify current password by re-authenticating
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user?.email || "",
-        password: currentPassword,
-      });
+      // Update password (Firebase auth function handles re-authentication)
+      const { error } = await updateUserPassword(currentPassword, newPassword);
 
-      if (signInError) {
-        toast({
-          title: "Incorrect password",
-          description: "Your current password is incorrect",
-          variant: "destructive",
-        });
+      if (error) {
+        // Check if it's an auth error
+        if (error.message.includes('auth/wrong-password') || error.message.includes('credential')) {
+          toast({
+            title: "Incorrect password",
+            description: "Your current password is incorrect",
+            variant: "destructive",
+          });
+        } else {
+          throw error;
+        }
         setIsPasswordSaving(false);
         return;
       }
-
-      // Update password
-      const { error } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (error) throw error;
 
       toast({
         title: "Password updated",
@@ -412,8 +357,8 @@ export default function AdminProfile() {
   };
 
   const getInitials = () => {
-    if (profile?.first_name || profile?.last_name) {
-      return `${profile.first_name?.[0] || ""}${profile.last_name?.[0] || ""}`.toUpperCase();
+    if (profile?.firstName || profile?.lastName) {
+      return `${profile.firstName?.[0] || ""}${profile.lastName?.[0] || ""}`.toUpperCase();
     }
     return user?.email?.[0]?.toUpperCase() || "A";
   };
@@ -461,16 +406,16 @@ export default function AdminProfile() {
           <div className="flex items-center gap-6">
             <div className="relative group">
               <Avatar 
-                className={`h-24 w-24 ${profile?.avatar_url ? "cursor-pointer" : ""}`}
-                onClick={() => profile?.avatar_url && setDeleteDialogOpen(true)}
+                className={`h-24 w-24 ${profile?.photoURL ? "cursor-pointer" : ""}`}
+                onClick={() => profile?.photoURL && setDeleteDialogOpen(true)}
               >
-                <AvatarImage src={profile?.avatar_url || undefined} alt="Profile" />
+                <AvatarImage src={profile?.photoURL || undefined} alt="Profile" />
                 <AvatarFallback className="text-2xl bg-primary/10 text-primary">
                   {getInitials()}
                 </AvatarFallback>
               </Avatar>
               {/* Delete overlay - only shows when avatar exists */}
-              {profile?.avatar_url && (
+              {profile?.photoURL && (
                 <div 
                   onClick={() => setDeleteDialogOpen(true)}
                   className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center"
@@ -499,10 +444,10 @@ export default function AdminProfile() {
             </div>
             <div>
               <h3 className="font-medium">
-                {getDisplayTitle()} {profile?.first_name} {profile?.last_name}
+                {getDisplayTitle()} {profile?.firstName} {profile?.lastName}
               </h3>
               <p className="text-sm text-muted-foreground">{user?.email}</p>
-              {profile?.avatar_url && (
+              {profile?.photoURL && (
                 <p className="text-xs text-muted-foreground mt-1">Click photo to remove</p>
               )}
             </div>
