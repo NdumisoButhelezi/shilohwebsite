@@ -46,6 +46,8 @@ export interface Video {
   title: string;
   youtubeVideoId: string;
   description?: string;
+  thumbnailUrl?: string;
+  eventId?: string | null;
   displayOrder: number;
   isActive: boolean;
   createdAt: Date | Timestamp;
@@ -96,6 +98,7 @@ export interface GalleryAlbum {
   id?: string;
   title: string;
   description?: string;
+  eventId?: string | null;
   coverImageUrl?: string;
   displayOrder: number;
   isActive: boolean;
@@ -107,6 +110,7 @@ export interface GalleryImage {
   id?: string;
   albumId: string;
   imageUrl: string;
+  imageData?: string; // base64 compressed image
   thumbnailUrl?: string;
   title?: string;
   description?: string;
@@ -119,20 +123,31 @@ export interface GalleryImage {
 
 export const getActiveEvents = async (): Promise<Event[]> => {
   const eventsRef = collection(db, EVENTS_COLLECTION);
-  const q = query(
-    eventsRef,
-    where('isActive', '==', true),
-    orderBy('eventDate', 'asc')
-  );
+  const q = query(eventsRef, where('isActive', '==', true));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Event));
+  const events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Event));
+  
+  console.log('Fetched active events:', events.length, events);
+  
+  // Sort by eventDate in JavaScript instead of Firestore to avoid composite index requirement
+  return events.sort((a, b) => {
+    const dateA = a.eventDate instanceof Date ? a.eventDate : (a.eventDate as any).toDate();
+    const dateB = b.eventDate instanceof Date ? b.eventDate : (b.eventDate as any).toDate();
+    return dateA.getTime() - dateB.getTime();
+  });
 };
 
 export const getAllEvents = async (): Promise<Event[]> => {
   const eventsRef = collection(db, EVENTS_COLLECTION);
-  const q = query(eventsRef, orderBy('eventDate', 'desc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Event));
+  const snapshot = await getDocs(eventsRef);
+  const events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Event));
+  
+  // Sort by eventDate descending in JavaScript
+  return events.sort((a, b) => {
+    const dateA = a.eventDate instanceof Date ? a.eventDate : (a.eventDate as any).toDate();
+    const dateB = b.eventDate instanceof Date ? b.eventDate : (b.eventDate as any).toDate();
+    return dateB.getTime() - dateA.getTime();
+  });
 };
 
 export const createEvent = async (event: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
@@ -180,8 +195,10 @@ export const getAllVideos = async (): Promise<Video[]> => {
 
 export const createVideo = async (video: Omit<Video, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> => {
   const videosRef = collection(db, VIDEOS_COLLECTION);
+  const thumbnailUrl = video.youtubeVideoId ? `https://img.youtube.com/vi/${video.youtubeVideoId}/hqdefault.jpg` : undefined;
   const docRef = await addDoc(videosRef, {
     ...video,
+    thumbnailUrl,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -190,10 +207,12 @@ export const createVideo = async (video: Omit<Video, 'id' | 'createdAt' | 'updat
 
 export const updateVideo = async (videoId: string, data: Partial<Video>): Promise<void> => {
   const videoRef = doc(db, VIDEOS_COLLECTION, videoId);
-  await updateDoc(videoRef, {
-    ...data,
-    updatedAt: serverTimestamp(),
-  });
+  const updateData: any = { ...data };
+  if (data.youtubeVideoId && !data.thumbnailUrl) {
+    updateData.thumbnailUrl = `https://img.youtube.com/vi/${data.youtubeVideoId}/hqdefault.jpg`;
+  }
+  updateData.updatedAt = serverTimestamp();
+  await updateDoc(videoRef, updateData);
 };
 
 export const deleteVideo = async (videoId: string): Promise<void> => {
@@ -319,24 +338,29 @@ export const deleteServiceTime = async (serviceTimeId: string): Promise<void> =>
 
 export const getActiveGalleryAlbums = async (): Promise<GalleryAlbum[]> => {
   const albumsRef = collection(db, GALLERY_ALBUMS_COLLECTION);
-  const q = query(
-    albumsRef,
-    where('isActive', '==', true),
-    orderBy('displayOrder', 'asc')
-  );
+  const q = query(albumsRef, where('isActive', '==', true));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryAlbum));
+  const albums = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryAlbum));
+  // Sort by displayOrder in JavaScript to avoid composite index requirement
+  return albums.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 };
 
 export const getGalleryImagesByAlbum = async (albumId: string): Promise<GalleryImage[]> => {
   const imagesRef = collection(db, GALLERY_IMAGES_COLLECTION);
-  const q = query(
-    imagesRef,
-    where('albumId', '==', albumId),
-    orderBy('displayOrder', 'asc')
-  );
+  // Query images for album and sort in JS to avoid composite index issues
+  const q = query(imagesRef, where('albumId', '==', albumId));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryImage));
+  const images = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as GalleryImage));
+  // Debugging: log fetch results (visible in browser console)
+  try {
+    // eslint-disable-next-line no-console
+    console.log('getGalleryImagesByAlbum - albumId:', albumId, 'count:', images.length);
+    // eslint-disable-next-line no-console
+    if (images.length > 0) console.log('getGalleryImagesByAlbum first:', images[0]);
+  } catch (e) {
+    // ignore logging errors
+  }
+  return images.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 };
 
 export const createGalleryAlbum = async (
@@ -363,12 +387,13 @@ export const createGalleryImage = async (
 };
 export const getAllGalleryAlbums = async (): Promise<GalleryAlbum[]> => {
   const albumsRef = collection(db, GALLERY_ALBUMS_COLLECTION);
-  const q = query(albumsRef, orderBy('displayOrder', 'asc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryAlbum));
+  const snapshot = await getDocs(albumsRef);
+  const albums = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as GalleryAlbum));
+  // Sort by displayOrder in JavaScript to avoid index requirement
+  return albums.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 };
 
-export const updateGalleryAlbum = async (
+export const updateGalleryAlbum = async(
   albumId: string,
   data: Partial<Omit<GalleryAlbum, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<void> => {

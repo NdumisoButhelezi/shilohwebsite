@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getAllGalleryAlbums, createGalleryAlbum, updateGalleryAlbum, deleteGalleryAlbum, getGalleryImagesByAlbum, createGalleryImage, deleteGalleryImage, updateImageOrder } from "@/integrations/firebase/firestore/church";
+import { getAllGalleryAlbums, createGalleryAlbum, updateGalleryAlbum, deleteGalleryAlbum, getGalleryImagesByAlbum, createGalleryImage, deleteGalleryImage, updateImageOrder, getAllEvents } from "@/integrations/firebase/firestore/church";
 import { uploadFile, deleteFile } from "@/integrations/firebase/client";
+import { compressImageToBase64, addBase64Prefix, isValidBase64Image } from "@/utils/imageCompression";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +25,7 @@ interface Album {
   id: string;
   title: string;
   description: string | null;
+  eventId?: string | null;
   coverImageUrl: string | null;
   isActive: boolean;
   displayOrder: number;
@@ -40,38 +43,64 @@ interface GalleryImage {
 export default function Gallery() {
   const [isAlbumDialogOpen, setIsAlbumDialogOpen] = useState(false);
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
-  const [newAlbum, setNewAlbum] = useState({ title: "", description: "" });
+  const [newAlbum, setNewAlbum] = useState({ title: "", description: "", eventId: "" });
   const [uploading, setUploading] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const { data: albums, isLoading } = useQuery({
     queryKey: ["admin-albums"],
-    queryFn: getAllGalleryAlbums,
+    queryFn: async () => {
+      console.log("Fetching all gallery albums...");
+      const result = await getAllGalleryAlbums();
+      console.log("Gallery albums fetched:", result);
+      console.log("Number of albums:", result.length);
+      if (result.length > 0) {
+        console.log("First album structure:", result[0]);
+        console.log("Album createdAt type:", typeof result[0].createdAt, result[0].createdAt);
+      }
+      return result;
+    },
     refetchInterval: 5000, // Background refresh every 5 seconds
+  });
+
+  const { data: events } = useQuery({
+    queryKey: ["all-events-for-gallery"],
+    queryFn: getAllEvents,
   });
 
   const { data: albumImages } = useQuery({
     queryKey: ["album-images", selectedAlbum?.id],
     queryFn: async () => {
       if (!selectedAlbum) return [];
-      return getGalleryImagesByAlbum(selectedAlbum.id);
+      console.log("Fetching images for album:", selectedAlbum.id, selectedAlbum.title);
+      const images = await getGalleryImagesByAlbum(selectedAlbum.id);
+      console.log("Images fetched:", images);
+      console.log("Number of images:", images.length);
+      if (images.length > 0) {
+        console.log("First image:", images[0]);
+        console.log("Image URL length:", images[0].imageUrl?.length);
+      }
+      return images;
     },
     enabled: !!selectedAlbum,
     refetchInterval: 5000, // Background refresh every 5 seconds
   });
 
   const createAlbumMutation = useMutation({
-    mutationFn: async (album: { title: string; description: string }) => {
+    mutationFn: async (album: { title: string; description: string; eventId: string }) => {
       await createGalleryAlbum({
         title: album.title,
-        description: album.description || null,
+        description: album.description || undefined,
+        eventId: album.eventId || null,
+        isActive: true,
+        displayOrder: 0,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-albums"] });
       setIsAlbumDialogOpen(false);
-      setNewAlbum({ title: "", description: "" });
+      setNewAlbum({ title: "", description: "", eventId: "" });
       toast({ title: "Album created successfully" });
     },
     onError: (error: Error) => {
@@ -105,13 +134,7 @@ export default function Gallery() {
 
   const deleteImageMutation = useMutation({
     mutationFn: async (image: GalleryImage) => {
-      // Delete from storage
-      const fileName = image.imageUrl.split("/").pop();
-      if (fileName && selectedAlbum?.id) {
-        const storagePath = `gallery/${selectedAlbum.id}/${fileName}`;
-        await deleteFile(storagePath);
-      }
-      // Delete from database
+      // Delete from Firestore (base64 stored in document)
       await deleteGalleryImage(image.id);
     },
     onSuccess: () => {
@@ -128,34 +151,45 @@ export default function Gallery() {
 
     setUploading(true);
     const files = Array.from(e.target.files);
+    console.log("Starting upload of", files.length, "files for album:", selectedAlbum.id);
 
     try {
       for (const file of files) {
-        const fileExt = file.name.split(".").pop();
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const storagePath = `gallery/${selectedAlbum.id}/${fileName}`;
+        console.log("Compressing file:", file.name, "Size:", file.size, "bytes");
+        
+        // Compress image to base64
+        const base64Image = await compressImageToBase64(file, {
+          maxWidth: 1920,
+          maxHeight: 1080,
+          quality: 0.8,
+          outputFormat: 'jpeg'
+        });
 
-        // Upload to Firebase storage
-        const imageUrl = await uploadFile(storagePath, file, file.type);
+        console.log("Compressed base64 length:", base64Image.length, "characters");
 
-        // Save to Firestore
-        await createGalleryImage({
+        // Save to Firestore with base64 data
+        const imageId = await createGalleryImage({
           albumId: selectedAlbum.id,
-          imageUrl,
+          imageUrl: base64Image, // Store base64 directly
           caption: null,
           displayOrder: 0,
         });
 
+        console.log("Image saved with ID:", imageId);
+
         // Update cover image if first image
         if (!selectedAlbum.coverImageUrl) {
-          await updateGalleryAlbum(selectedAlbum.id, { coverImageUrl: imageUrl });
+          await updateGalleryAlbum(selectedAlbum.id, { coverImageUrl: base64Image });
+          console.log("Updated cover image for album");
         }
       }
 
       queryClient.invalidateQueries({ queryKey: ["album-images", selectedAlbum.id] });
       queryClient.invalidateQueries({ queryKey: ["admin-albums"] });
       toast({ title: `${files.length} image(s) uploaded successfully` });
+      console.log("Upload complete, queries invalidated");
     } catch (error: unknown) {
+      console.error("Upload error:", error);
       toast({
         title: "Error uploading images",
         description: error instanceof Error ? error.message : "Unknown error",
@@ -204,6 +238,25 @@ export default function Gallery() {
                   placeholder="Brief description of the album"
                 />
               </div>
+              <div>
+                <Label htmlFor="event">Link to Event (optional)</Label>
+                <Select
+                  value={newAlbum.eventId || "none"}
+                  onValueChange={(value) => setNewAlbum({ ...newAlbum, eventId: value === "none" ? "" : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select an event" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Event</SelectItem>
+                    {events?.map((event) => (
+                      <SelectItem key={event.id} value={event.id!}>
+                        {event.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 onClick={() => createAlbumMutation.mutate(newAlbum)}
                 disabled={!newAlbum.title || createAlbumMutation.isPending}
@@ -220,37 +273,49 @@ export default function Gallery() {
         {/* Albums List */}
         <div className="lg:col-span-1 space-y-4">
           <h2 className="font-semibold text-lg">Albums</h2>
-          {isLoading ? (
-            <p className="text-muted-foreground">Loading...</p>
-          ) : albums && albums.length > 0 ? (
-            <div className="space-y-2">
-              {albums.map((album) => (
-                <Card
-                  key={album.id}
-                  className={`cursor-pointer transition-colors ${
-                    selectedAlbum?.id === album.id ? "border-primary" : ""
-                  }`}
-                  onClick={() => setSelectedAlbum(album)}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium truncate">{album.title}</h3>
-                        <p className="text-sm text-muted-foreground">
-                          {format(new Date(album.createdAt), "MMM d, yyyy")}
-                        </p>
-                      </div>
-                      <Badge variant={album.isActive ? "default" : "secondary"}>
-                        {album.isActive ? "Active" : "Hidden"}
-                      </Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <p className="text-muted-foreground text-center py-8">No albums yet</p>
-          )}
+          {(() => {
+            console.log("Render check - isLoading:", isLoading, "albums:", albums, "albums.length:", albums?.length);
+            if (isLoading) {
+              return <p className="text-muted-foreground">Loading...</p>;
+            } else if (albums && albums.length > 0) {
+              console.log("Rendering albums:", albums.length);
+              return (
+                <div className="space-y-2">
+                  {albums.map((album) => (
+                    <Card
+                      key={album.id}
+                      className={`cursor-pointer transition-colors ${
+                        selectedAlbum?.id === album.id ? "border-primary" : ""
+                      }`}
+                      onClick={() => setSelectedAlbum(album)}
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-medium truncate">{album.title}</h3>
+                            <p className="text-sm text-muted-foreground">
+                              {album.createdAt && format(
+                                album.createdAt instanceof Date 
+                                  ? album.createdAt 
+                                  : new Date((album.createdAt as any).seconds * 1000), 
+                                "MMM d, yyyy"
+                              )}
+                            </p>
+                          </div>
+                          <Badge variant={album.isActive ? "default" : "secondary"}>
+                            {album.isActive ? "Active" : "Hidden"}
+                          </Badge>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              );
+            } else {
+              console.log("No albums to show");
+              return <p className="text-muted-foreground text-center py-8">No albums yet</p>;
+            }
+          })()}
         </div>
 
         {/* Album Details */}
@@ -314,33 +379,50 @@ export default function Gallery() {
                 </div>
 
                 {/* Images Grid */}
-                {albumImages && albumImages.length > 0 ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {albumImages.map((image) => (
-                      <div key={image.id} className="relative group aspect-square">
-                        <img
-                          src={image.imageUrl}
-                          alt={image.caption || "Gallery image"}
-                          className="w-full h-full object-cover rounded-lg"
-                        />
-                        <Button
-                          variant="destructive"
-                          size="icon"
-                          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8"
-                          onClick={() => deleteImageMutation.mutate(image)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                {(() => {
+                  // Debug render-time info
+                  // eslint-disable-next-line no-console
+                  console.log('Render - albumImages:', albumImages);
+                  if (albumImages && albumImages.length > 0) {
+                    return (
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {albumImages.map((image) => {
+                          let raw = (image as any).imageUrl || (image as any).imageData || (image as any).image_url || '';
+                          let src = raw;
+                          if (raw && !raw.startsWith('data:image')) {
+                            if (isValidBase64Image(raw)) {
+                              src = addBase64Prefix(raw);
+                            }
+                          }
+                          return (
+                            <div key={image.id} className="relative group aspect-square">
+                              <img
+                                src={src}
+                                alt={image.caption || "Gallery image"}
+                                className="w-full h-full object-cover rounded-lg"
+                              />
+                              <Button
+                                variant="destructive"
+                                size="icon"
+                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8"
+                                onClick={() => deleteImageMutation.mutate(image)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <Image className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>No images in this album yet</p>
-                    <p className="text-sm">Upload some photos to get started</p>
-                  </div>
-                )}
+                    );
+                  }
+                  return (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Image className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No images in this album yet</p>
+                      <p className="text-sm">Upload some photos to get started</p>
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           ) : (

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getAllVideos, createVideo, updateVideo, deleteVideo, updateVideoOrder } from "@/integrations/firebase/firestore/church";
+import { getAllVideos, createVideo, updateVideo, deleteVideo, updateVideoOrder, getAllEvents } from "@/integrations/firebase/firestore/church";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +17,7 @@ interface VideoFormData {
   title: string;
   youtube_video_id: string;
   description: string;
+  eventId: string;
   is_active: boolean;
 }
 
@@ -22,6 +25,7 @@ const defaultFormData: VideoFormData = {
   title: "",
   youtube_video_id: "",
   description: "",
+  eventId: "",
   is_active: true,
 };
 
@@ -49,6 +53,11 @@ export default function AdminVideos() {
     queryFn: getAllVideos,
   });
 
+  const { data: events } = useQuery({
+    queryKey: ["all-events-for-videos"],
+    queryFn: getAllEvents,
+  });
+
   const createMutation = useMutation({
     mutationFn: async (data: VideoFormData) => {
       const maxOrder = videos?.length ? Math.max(...videos.map(v => v.displayOrder || 0)) : 0;
@@ -56,6 +65,7 @@ export default function AdminVideos() {
         title: data.title,
         youtubeVideoId: extractYouTubeId(data.youtube_video_id),
         description: data.description,
+        eventId: data.eventId || null,
         isActive: data.is_active,
         displayOrder: maxOrder + 1,
       });
@@ -75,6 +85,7 @@ export default function AdminVideos() {
         title: data.title,
         youtubeVideoId: extractYouTubeId(data.youtube_video_id),
         description: data.description,
+        eventId: data.eventId || null,
         isActive: data.is_active,
       });
     },
@@ -112,6 +123,7 @@ export default function AdminVideos() {
       title: video.title,
       youtube_video_id: video.youtubeVideoId,
       description: video.description || "",
+      eventId: video.eventId || "",
       is_active: video.isActive ?? true,
     });
     setIsDialogOpen(true);
@@ -171,12 +183,32 @@ export default function AdminVideos() {
 
               <div className="space-y-2">
                 <Label htmlFor="description">Description (optional)</Label>
-                <Input
+                <Textarea
                   id="description"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   placeholder="Brief description of the video"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="event">Link to Event (optional)</Label>
+                <Select
+                  value={formData.eventId || "none"}
+                  onValueChange={(value) => setFormData({ ...formData, eventId: value === "none" ? "" : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select an event" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No Event</SelectItem>
+                    {events?.map((event) => (
+                      <SelectItem key={event.id} value={event.id!}>
+                        {event.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="flex items-center gap-2">
@@ -223,7 +255,7 @@ export default function AdminVideos() {
             <Card key={video.id} className="border-0 shadow-md overflow-hidden group">
               <div className="relative aspect-video bg-muted">
                 <img
-                  src={`https://img.youtube.com/vi/${video.youtube_video_id}/mqdefault.jpg`}
+                  src={video.thumbnailUrl || `https://img.youtube.com/vi/${video.youtubeVideoId}/mqdefault.jpg`}
                   alt={video.title}
                   className="w-full h-full object-cover"
                 />

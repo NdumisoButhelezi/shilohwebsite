@@ -22,17 +22,25 @@ export function EventsSection() {
     queryKey: ["events"],
     queryFn: async () => {
       const allEvents = await getActiveEvents();
+      console.log('All active events from Firebase:', allEvents);
+      
       // Filter for upcoming events and limit to 4
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      return allEvents
+      
+      const upcomingEvents = allEvents
         .filter(event => {
           const eventDate = event.eventDate instanceof Date 
             ? event.eventDate 
             : (event.eventDate as any).toDate();
-          return eventDate >= today;
+          const isUpcoming = eventDate >= today;
+          console.log('Event:', event.title, 'Date:', eventDate, 'Is upcoming?', isUpcoming);
+          return isUpcoming;
         })
         .slice(0, 4);
+      
+      console.log('Upcoming events to display:', upcomingEvents);
+      return upcomingEvents;
     },
     staleTime: 0,
     refetchOnWindowFocus: true,

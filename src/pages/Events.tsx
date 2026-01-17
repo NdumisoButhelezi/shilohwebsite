@@ -58,17 +58,7 @@ export default function Events() {
 
   const { data: events, isLoading } = useQuery({
     queryKey: ["all-events"],
-    queryFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .gte("event_date", today)
-        .order("event_date", { ascending: true });
-
-      if (error) throw error;
-      return data;
-    },
+    queryFn: getActiveEvents,
     staleTime: 0,
   });
 
@@ -76,10 +66,12 @@ export default function Events() {
     if (!events) return [];
     
     return events.filter((event) => {
-      const eventDate = parseISO(event.event_date);
+      const eventDate = event.eventDate instanceof Date 
+        ? event.eventDate 
+        : (event.eventDate as any).toDate();
       const eventMonth = getMonth(eventDate);
       
-      const matchesType = selectedType === "all" || event.event_type === selectedType;
+      const matchesType = selectedType === "all" || event.eventType === selectedType;
       const matchesMonth = selectedMonth === "all" || eventMonth === parseInt(selectedMonth);
       
       return matchesType && matchesMonth;
@@ -217,7 +209,9 @@ export default function Events() {
                 ))
               ) : filteredEvents.length > 0 ? (
                 filteredEvents.map((event) => {
-                  const eventDate = parseISO(event.event_date);
+                  const eventDate = event.eventDate instanceof Date 
+                    ? event.eventDate 
+                    : (event.eventDate as any).toDate();
                   return (
                     <Card
                       key={event.id}
@@ -242,9 +236,9 @@ export default function Events() {
                           <div className="flex items-center gap-2 mb-3">
                             <Badge 
                               variant="secondary" 
-                              className={eventTypeColors[event.event_type || "general"]}
+                              className={eventTypeColors[event.eventType || "general"]}
                             >
-                              {(event.event_type || "general").charAt(0).toUpperCase() + (event.event_type || "general").slice(1)}
+                              {(event.eventType || "general").charAt(0).toUpperCase() + (event.eventType || "general").slice(1)}
                             </Badge>
                           </div>
 
@@ -261,7 +255,7 @@ export default function Events() {
                           <div className="flex flex-col gap-2 text-sm text-muted-foreground">
                             <div className="flex items-center gap-2">
                               <Clock className="h-4 w-4 text-primary" />
-                              <span>{formatTime(event.start_time, event.end_time)}</span>
+                              <span>{formatTime(event.startTime, event.endTime)}</span>
                             </div>
                             {event.location && (
                               <div className="flex items-center gap-2">
