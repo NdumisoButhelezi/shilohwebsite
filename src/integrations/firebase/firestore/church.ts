@@ -177,13 +177,16 @@ export const deleteEvent = async (eventId: string): Promise<void> => {
 
 export const getActiveVideos = async (): Promise<Video[]> => {
   const videosRef = collection(db, VIDEOS_COLLECTION);
-  const q = query(
-    videosRef,
-    where('isActive', '==', true),
-    orderBy('displayOrder', 'asc')
-  );
+  const q = query(videosRef, where('isActive', '==', true));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Video));
+  const videos = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Video));
+  try {
+    // eslint-disable-next-line no-console
+    console.log('getActiveVideos - count:', videos.length);
+    // eslint-disable-next-line no-console
+    if (videos.length > 0) console.log('getActiveVideos first:', videos[0]);
+  } catch (e) {}
+  return videos.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 };
 
 export const getAllVideos = async (): Promise<Video[]> => {

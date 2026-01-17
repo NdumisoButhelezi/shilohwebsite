@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getActiveVideos, getChurchInfo } from "@/integrations/firebase/firestore/church";
+import { getActiveVideos, getAllVideos, getChurchInfo } from "@/integrations/firebase/firestore/church";
 import { Play, ExternalLink, Video, Image } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,21 @@ export function GallerySection() {
   const { data: videos, isLoading } = useQuery({
     queryKey: ["videos"],
     queryFn: async () => {
-      const allVideos = await getActiveVideos();
-      return allVideos.slice(0, 6); // Limit to 6
+      // Try to get active videos first
+      let active = await getActiveVideos();
+      // eslint-disable-next-line no-console
+      console.log('GallerySection - active videos count:', active.length);
+      if (!active || active.length === 0) {
+        // Fallback: fetch all videos (including drafts) so site shows entries
+        const all = await getAllVideos();
+        // eslint-disable-next-line no-console
+        console.log('GallerySection - no active videos, fetched all videos count:', all.length);
+        // mark that we're showing drafts by returning all but still slice
+        return all.slice(0, 6);
+      }
+      // eslint-disable-next-line no-console
+      console.log('GallerySection - using active videos');
+      return active.slice(0, 6);
     },
   });
 

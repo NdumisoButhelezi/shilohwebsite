@@ -1,0 +1,4 @@
+/*    /index.html   200
+
+# Optional: redirect /admin/* to index as well (not necessary if SPA fallback exists)
+#/admin/*    /index.html   200
